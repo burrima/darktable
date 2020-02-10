@@ -375,8 +375,7 @@ static inline float get_pixel_norm(const float pixel[4], const dt_iop_filmicrgb_
 #endif
 static inline float log_tonemapping(const float x, const float grey, const float black, const float dynamic_range)
 {
-  const float temp = (log2f(x / grey) - black) / dynamic_range;
-  return fmaxf(fminf(temp, 1.0f), 1.52587890625e-05f);
+  return (log2f(x / grey) - black) / dynamic_range;
 }
 
 
@@ -456,6 +455,11 @@ void process(dt_iop_module_t *self, dt_dev_pixelpipe_iop_t *piece, const void *c
   const int variant = data->preserve_color;
   const dt_iop_filmic_rgb_spline_t spline = (dt_iop_filmic_rgb_spline_t)data->spline;
 
+  // black and white clipping levels acc. to source black and source white and a maximum clipping
+  // range of [1e-6, 1.0]:
+  const float bcl = fmaxf(powf(2.0f, 1e-6f + data->black_source) * data->grey_source, 1e-6f);
+  const float wcl = fminf(powf(2.0f, data->dynamic_range + data->black_source) * data->grey_source, 1.0f);
+
   if(variant == DT_FILMIC_METHOD_NONE) // no chroma preservation
   {
 #ifdef _OPENMP
@@ -469,10 +473,11 @@ void process(dt_iop_module_t *self, dt_dev_pixelpipe_iop_t *piece, const void *c
       float *const pix_out = out + k;
       float DT_ALIGNED_PIXEL temp[4];
 
+      for (int c=0; c<3; c++) temp[c] = fminf(fmaxf(pix_in[c], bcl), wcl);
+
       // Log tone-mapping
       for(int c = 0; c < 3; c++)
-        temp[c] = log_tonemapping((pix_in[c] < 1.52587890625e-05f) ? 1.52587890625e-05f : pix_in[c],
-                                   data->grey_source, data->black_source, data->dynamic_range);
+        temp[c] = log_tonemapping(temp[c], data->grey_source, data->black_source, data->dynamic_range);
 
       // Get the desaturation coeff based on the log value
       const float lum = (work_profile) ? dt_ioppr_get_rgb_matrix_luminance(temp,
@@ -504,17 +509,14 @@ void process(dt_iop_module_t *self, dt_dev_pixelpipe_iop_t *piece, const void *c
       const float *const pix_in = in + k;
       float *const pix_out = out + k;
 
-      float DT_ALIGNED_PIXEL ratios[4];
-      float norm = get_pixel_norm(pix_in, variant, work_profile);
+      float DT_ALIGNED_PIXEL temp[4];
+      for (int c=0; c<3; c++) temp[c] = fminf(fmaxf(pix_in[c], bcl), wcl);
 
-      norm = (norm < 1.52587890625e-05f) ? 1.52587890625e-05f : norm; // norm can't be < to 2^(-16)
+      float DT_ALIGNED_PIXEL ratios[4];
+      float norm = get_pixel_norm(temp, variant, work_profile);
 
       // Save the ratios
-      for(int c = 0; c < 3; c++) ratios[c] = pix_in[c] / norm;
-
-      // Sanitize the ratios
-      const float min_ratios = fminf(fminf(ratios[0], ratios[1]), ratios[2]);
-      if(min_ratios < 0.0f) for(int c = 0; c < 3; c++) ratios[c] -= min_ratios;
+      for(int c = 0; c < 3; c++) ratios[c] = temp[c] / norm;
 
       // Log tone-mapping
       norm = log_tonemapping(norm, data->grey_source, data->black_source, data->dynamic_range);
