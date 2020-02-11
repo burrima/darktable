@@ -507,40 +507,50 @@ void process(dt_iop_module_t *self, dt_dev_pixelpipe_iop_t *piece, const void *c
       float DT_ALIGNED_PIXEL ratios[4];
       float norm = get_pixel_norm(pix_in, variant, work_profile);
 
+      // norm is in ]-inf; inf[ now (most values will be in [0, 1] but there might be some values
+      // outside this range, especially when the exposure module was used.
+
       norm = (norm < 1.52587890625e-05f) ? 1.52587890625e-05f : norm; // norm can't be < to 2^(-16)
 
       // Save the ratios
       for(int c = 0; c < 3; c++) ratios[c] = pix_in[c] / norm;
+      // -> ratios are in ]-inf, 1] for max-rgb norm
 
       // Sanitize the ratios
       const float min_ratios = fminf(fminf(ratios[0], ratios[1]), ratios[2]);
       if(min_ratios < 0.0f) for(int c = 0; c < 3; c++) ratios[c] -= min_ratios;
+      // -> ratios are in [0, 1] for max-rgb norm
 
       // Log tone-mapping
       norm = log_tonemapping(norm, data->grey_source, data->black_source, data->dynamic_range);
+      // -> norm is now in [2^-16, 1]
 
       // Get the desaturation value based on the log value
       const float desaturation = filmic_desaturate(norm, data->sigma_toe, data->sigma_shoulder, data->saturation);
+      // -> desaturation is in [data->saturation, 1.0[
 
       for(int c = 0; c < 3; c++) ratios[c] *= norm;
+      // -> ratios are still in [0, 1]
 
-      const float lum = (work_profile) ? dt_ioppr_get_rgb_matrix_luminance(ratios,
-                                                                           work_profile->matrix_in,
-                                                                           work_profile->lut_in,
-                                                                           work_profile->unbounded_coeffs_in,
-                                                                           work_profile->lutsize,
-                                                                           work_profile->nonlinearlut)
-                                        : dt_camera_rgb_luminance(ratios);
+//      const float lum = (work_profile) ? dt_ioppr_get_rgb_matrix_luminance(ratios,
+//                                                                           work_profile->matrix_in,
+//                                                                           work_profile->lut_in,
+//                                                                           work_profile->unbounded_coeffs_in,
+//                                                                           work_profile->lutsize,
+//                                                                           work_profile->nonlinearlut)
+//                                        : dt_camera_rgb_luminance(ratios);
 
       // Desaturate on the non-linear parts of the curve and save ratios
-      for(int c = 0; c < 3; c++) ratios[c] = linear_saturation(ratios[c], lum, desaturation) / norm;
+      for(int c = 0; c < 3; c++) ratios[c] = linear_saturation(ratios[c], norm, desaturation) / norm;
 
       // Filmic S curve on the max RGB
       // Apply the transfer function of the display
       norm = powf(clamp_simd(filmic_spline(norm, spline.M1, spline.M2, spline.M3, spline.M4, spline.M5, spline.latitude_min, spline.latitude_max)), data->output_power);
+      // -> norm in [0, 1] now (with applied output gamma)
 
       // Re-apply ratios
       for(int c = 0; c < 3; c++) pix_out[c] = ratios[c] * norm;
+      // -> pix_out in [0, 1] (with applied output gamma)
     }
   }
 
