@@ -341,11 +341,14 @@ static inline float pixel_rgb_norm_power(const float pixel[4])
 static inline float get_pixel_norm(const float pixel[4], const dt_iop_filmicrgb_methods_type_t variant,
                                    const dt_iop_order_iccprofile_info_t *const work_profile)
 {
+  // note: norms are expected to be in ]0.0; +infinity[. For MAX_RGB this has been optimized away
+  // since values are clipped in log_tonemapping() already.
   switch(variant)
   {
     case(DT_FILMIC_METHOD_MAX_RGB):
       return fmaxf(fmaxf(pixel[0], pixel[1]), pixel[2]);
 
+    default:
     case(DT_FILMIC_METHOD_LUMINANCE):
       return (work_profile) ? dt_ioppr_get_rgb_matrix_luminance(pixel,
                                                                 work_profile->matrix_in,
@@ -357,15 +360,6 @@ static inline float get_pixel_norm(const float pixel[4], const dt_iop_filmicrgb_
 
     case(DT_FILMIC_METHOD_POWER_NORM):
       return pixel_rgb_norm_power(pixel);
-
-    default:
-      return (work_profile) ? dt_ioppr_get_rgb_matrix_luminance(pixel,
-                                                                work_profile->matrix_in,
-                                                                work_profile->lut_in,
-                                                                work_profile->unbounded_coeffs_in,
-                                                                work_profile->lutsize,
-                                                                work_profile->nonlinearlut)
-                            : dt_camera_rgb_luminance(pixel);
   }
 }
 
