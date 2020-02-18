@@ -416,6 +416,7 @@ static inline void dt_LCH_2_Lab(const float *const LCH, float *const Lab)
 
 static inline float dt_camera_rgb_luminance(const float *const rgb)
 {
+  // note: these are srgb / rec 709 coefficients for D50 illuminant.
   return (rgb[0] * 0.2225045f + rgb[1] * 0.7168786f + rgb[2] * 0.0606169f);
 }
 
